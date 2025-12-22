@@ -22,3 +22,5 @@ Thumbs.db
 coverage/
 
 .kiro
+
+dist
