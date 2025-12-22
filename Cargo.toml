@@ -1,0 +1,15 @@
+[package]
+name = "dot"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A git command proxy CLI tool"
+license = "MIT"
+repository = "https://github.com/username/dot"
+keywords = ["git", "cli", "proxy"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1.4"
