@@ -1,10 +1,14 @@
-//! dot - A git command proxy CLI tool
+//! dot - A Git proxy for managing hidden directories
 //!
 //! This library provides the core functionality for the dot CLI,
-//! which acts as a transparent proxy for git commands.
+//! which manages hidden directories with version control through
+//! multiple Git repositories.
 
 pub mod error;
-pub mod git_proxy;
+pub mod config;
+pub mod index;
+pub mod git_operations;
+pub mod atomic;
+pub mod repository;
 
-pub use error::Error;
-pub use git_proxy::execute;
+pub use error::*;

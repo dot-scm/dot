@@ -3,13 +3,26 @@ name = "dot"
 version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-description = "A git command proxy CLI tool"
+description = "A Git proxy for managing hidden directories with version control"
 license = "MIT"
 repository = "https://github.com/username/dot"
-keywords = ["git", "cli", "proxy"]
+keywords = ["git", "cli", "proxy", "hidden", "directories"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+octocrab = "0.32"
+git2 = "0.18"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+async-trait = "0.1"
 
 [dev-dependencies]
-proptest = "1.4"
+proptest = "1.0"
+tempfile = "3.0"
+tokio-test = "0.4"

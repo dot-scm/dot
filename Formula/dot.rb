@@ -1,25 +1,32 @@
 class Dot < Formula
-  desc "A git command proxy CLI tool"
-  homepage "https://github.com/YOUR_USERNAME/dot"
-  version "0.1.0"
+  desc "A Git proxy for managing hidden directories with version control"
+  homepage "https://github.com/username/dot"
+  url "https://github.com/username/dot/archive/refs/tags/v0.1.0.tar.gz"
+  sha256 "PLACEHOLDER_SHA256"
   license "MIT"
 
-  on_macos do
-    on_arm do
-      url "https://github.com/YOUR_USERNAME/dot/releases/download/v0.1.0/dot-0.1.0-aarch64-apple-darwin.tar.gz"
-      sha256 "2d9fe4dc245bc1e1d7f88a52ca1e6d444d706b47ce98a8fec035572ccbe5914a"
-    end
-    on_intel do
-      url "https://github.com/YOUR_USERNAME/dot/releases/download/v0.1.0/dot-0.1.0-x86_64-apple-darwin.tar.gz"
-      sha256 "PLACEHOLDER_X86_64_SHA256"
-    end
-  end
+  depends_on "rust" => :build
+  depends_on "git"
 
   def install
-    bin.install "dot"
+    system "cargo", "install", *std_cargo_args
+  end
+
+  def caveats
+    <<~EOS
+      Before using dot, you need to:
+      1. Set your GitHub token: export GITHUB_TOKEN="your_token"
+      2. Configure organizations in ~/.dot/dot.conf
+      
+      See the README for detailed setup instructions.
+    EOS
   end
 
   test do
-    assert_match "dot #{version}", shell_output("#{bin}/dot --version")
+    # Test that the binary was installed correctly
+    assert_match "dot", shell_output("#{bin}/dot --version")
+    
+    # Test that help works
+    assert_match "Git proxy for managing hidden directories", shell_output("#{bin}/dot --help")
   end
 end
