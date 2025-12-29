@@ -2,7 +2,7 @@ use crate::config::ConfigManager;
 use crate::index::{IndexManager, ProjectRegistration};
 use crate::git_operations::GitOperations;
 use crate::atomic::{AtomicOperations, AddOperation, CommitOperation, PushOperation};
-use crate::error::{RepositoryError, DotError};
+use crate::error::RepositoryError;
 use std::path::{Path, PathBuf};
 use std::env;
 
@@ -29,7 +29,7 @@ impl RepositoryManager {
         
         // 获取 remote origin
         let remote_url = self.get_remote_origin(&current_dir)?;
-        let base_key = GitOperations::generate_base_key(&remote_url)?;
+        let _base_key = GitOperations::generate_base_key(&remote_url)?;
         
         // 生成所有 Repository Keys 并检查重复
         let mut repo_keys = Vec::new();

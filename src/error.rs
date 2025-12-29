@@ -83,6 +83,9 @@ pub enum OperationError {
     
     #[error("IO operation failed: {0}")]
     IoError(#[from] std::io::Error),
+    
+    #[error("Repository operation failed: {0}")]
+    RepositoryError(#[from] RepositoryError),
 }
 
 // 通用错误类型，用于主程序

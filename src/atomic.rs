@@ -1,7 +1,7 @@
 use crate::error::OperationError;
 use crate::git_operations::GitOperations;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 #[async_trait::async_trait]
@@ -166,12 +166,16 @@ impl Operation for CommitOperation {
             let repo = git2::Repository::open(&self.repository_path)?;
             let commit = repo.find_commit(commit_id)?;
             
-            if let Some(parent) = commit.parents().next() {
+            let parent_opt = commit.parents().next();
+            if let Some(parent) = parent_opt {
                 repo.reset(parent.as_object(), git2::ResetType::Hard, None)?;
             } else {
-                // 如果是第一个 commit，删除所有内容
+                // 如果是第一个 commit，创建一个空的 tree
+                let tree_builder = repo.treebuilder(None)?;
+                let empty_tree_id = tree_builder.write()?;
+                let empty_tree = repo.find_tree(empty_tree_id)?;
                 repo.reset(
-                    &repo.empty_tree()?.as_object(), 
+                    empty_tree.as_object(), 
                     git2::ResetType::Hard, 
                     None
                 )?;

@@ -72,15 +72,13 @@ impl IndexManager {
             .is_ok();
             
         if !repo_exists {
-            // 创建 .index 仓库
-            self.github_client
-                .repos(&self.remote_organization)
-                .create()
-                .name(".index")
-                .description("Dot CLI index repository")
-                .private(true)
-                .send()
-                .await?;
+            // 创建 .index 仓库 - 暂时跳过，需要手动创建
+            println!("Warning: .index repository does not exist in organization '{}'", self.remote_organization);
+            println!("Please create it manually on GitHub as a private repository.");
+            return Err(IndexError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound, 
+                "Index repository not found - please create it manually on GitHub"
+            )));
         }
         
         // 克隆或更新本地索引
