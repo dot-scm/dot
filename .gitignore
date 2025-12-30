@@ -26,3 +26,5 @@ dist
 /dot-cli
 
 .test-kiro
+
+.kiro

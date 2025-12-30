@@ -45,6 +45,27 @@ impl GitHubClient {
         description: &str,
         token: &str,
     ) -> Result<String, RepositoryError> {
+        // 先获取当前用户名，判断是个人账户还是组织
+        let current_user = match self.get_authenticated_user(token).await {
+            Ok(user) => user,
+            Err(e) => {
+                return Err(RepositoryError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("Failed to authenticate with GitHub. Please check your token has 'repo' permission. Error: {}", e)
+                )));
+            }
+        };
+        
+        println!("  Authenticated as: {}", current_user);
+        
+        // 如果 org 和当前用户名相同，使用用户 API
+        if org.eq_ignore_ascii_case(&current_user) {
+            println!("  Using user API (personal account)");
+            return self.create_repo_for_user(repo_name, description, token).await;
+        }
+        
+        // 否则尝试组织 API
+        println!("  Using organization API for: {}", org);
         let client = reqwest::Client::new();
         
         let request_body = CreateRepoRequest {
@@ -54,9 +75,6 @@ impl GitHubClient {
             auto_init: true,
         };
         
-        // 判断是用户还是组织
-        // 如果组织名和用户名相同，使用 /user/repos
-        // 否则使用 /orgs/{org}/repos
         let url = format!("https://api.github.com/orgs/{}/repos", org);
         
         let response = client
@@ -80,11 +98,6 @@ impl GitHubClient {
             return Ok(remote_url);
         }
         
-        // 如果组织 API 失败，尝试用户 API
-        if status.as_u16() == 404 {
-            return self.create_repo_for_user(repo_name, description, token).await;
-        }
-        
         // 处理错误
         let error_text = response.text().await.unwrap_or_default();
         
@@ -92,6 +105,13 @@ impl GitHubClient {
         if error_text.contains("already exists") || status.as_u16() == 422 {
             let remote_url = format!("git@github.com:{}/{}.git", org, repo_name);
             return Ok(remote_url);
+        }
+        
+        // 如果组织 API 返回 403 或 404，可能是权限问题或不是组织
+        if status.as_u16() == 403 || status.as_u16() == 404 {
+            println!("  Organization API failed ({}), trying user API...", status);
+            // 尝试用户 API 作为备选
+            return self.create_repo_for_user(repo_name, description, token).await;
         }
         
         Err(RepositoryError::IoError(std::io::Error::new(

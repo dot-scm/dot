@@ -49,7 +49,7 @@ impl SetupWizard {
     
     /// 检查 Git 配置
     fn check_git_config() -> Result<(), ConfigError> {
-        println!("📋 步骤 1/5: 检查 Git 配置");
+        println!("📋 步骤 1/6: 检查 Git 配置");
         println!();
         
         // 检查 git 是否安装
@@ -110,7 +110,7 @@ impl SetupWizard {
     
     /// 获取 GitHub 用户名
     fn get_github_username() -> Result<String, ConfigError> {
-        println!("👤 步骤 2/5: 获取 GitHub 用户名");
+        println!("👤 步骤 2/6: 获取 GitHub 用户名");
         println!();
         
         // 尝试从 git config 获取 GitHub 用户名

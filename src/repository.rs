@@ -36,15 +36,16 @@ impl RepositoryManager {
         let remote_url = self.get_remote_origin(&current_dir)?;
         let _base_key = GitOperations::generate_base_key(&remote_url)?;
         
-        // 生成所有 Repository Keys 并检查重复
+        // 生成所有 Repository Keys 并检查重复，同时记录目录是否已存在
         let mut repo_keys = Vec::new();
         for dir in &directories {
             let repo_key = GitOperations::generate_repository_key(&remote_url, Some(dir))?;
-            repo_keys.push((dir.clone(), repo_key));
+            let dir_exists = current_dir.join(dir).exists();
+            repo_keys.push((dir.clone(), repo_key, dir_exists));
         }
         
         // 检查重复
-        for (_, repo_key) in &repo_keys {
+        for (_, repo_key, _) in &repo_keys {
             if self.index_manager.project_exists(repo_key) {
                 return Err(RepositoryError::ProjectAlreadyExists(repo_key.clone()));
             }
@@ -57,17 +58,18 @@ impl RepositoryManager {
         
         if no_atomic {
             // 非原子操作
-            for (dir, repo_key) in repo_keys {
+            for (dir, repo_key, _) in repo_keys {
                 self.create_hidden_repository(&current_dir, &dir, &repo_key).await?;
             }
         } else {
             // 原子操作
-            let mut created_repos = Vec::new();
+            // 记录：(目录名, repo_key, 目录原本是否存在)
+            let mut created_repos: Vec<(String, String, bool)> = Vec::new();
             let mut rollback_needed = false;
             
-            for (dir, repo_key) in repo_keys {
+            for (dir, repo_key, dir_existed) in repo_keys {
                 match self.create_hidden_repository(&current_dir, &dir, &repo_key).await {
-                    Ok(_) => created_repos.push((dir, repo_key)),
+                    Ok(_) => created_repos.push((dir, repo_key, dir_existed)),
                     Err(e) => {
                         rollback_needed = true;
                         eprintln!("Failed to create hidden repository for {}: {}", dir, e);
@@ -78,8 +80,10 @@ impl RepositoryManager {
             
             if rollback_needed {
                 // 回滚已创建的仓库
-                for (dir, repo_key) in created_repos {
-                    if let Err(e) = self.rollback_hidden_repository(&current_dir, &dir, &repo_key).await {
+                for (dir, repo_key, dir_existed) in created_repos {
+                    // 只有当目录是我们新创建的才删除
+                    let dir_was_created = !dir_existed;
+                    if let Err(e) = self.rollback_hidden_repository(&current_dir, &dir, &repo_key, dir_was_created).await {
                         eprintln!("Failed to rollback {}: {}", dir, e);
                     }
                 }
@@ -268,8 +272,11 @@ impl RepositoryManager {
     ) -> Result<(), RepositoryError> {
         let hidden_dir = project_path.join(directory);
         
+        // 检查目录是否已存在
+        let dir_existed = hidden_dir.exists();
+        
         // 创建隐藏目录（如果不存在）
-        if !hidden_dir.exists() {
+        if !dir_existed {
             std::fs::create_dir_all(&hidden_dir)?;
         }
         
@@ -289,20 +296,32 @@ impl RepositoryManager {
                 url
             }
             Err(e) => {
-                // 远程仓库创建失败，清理本地目录并返回错误
-                if hidden_dir.exists() {
+                // 远程仓库创建失败
+                // 只有当目录是我们新创建的才删除，已存在的目录不能删！
+                if !dir_existed && hidden_dir.exists() {
                     let _ = std::fs::remove_dir_all(&hidden_dir);
                 }
                 return Err(e);
             }
         };
         
-        // 初始化本地 git 仓库
-        GitOperations::init_repository(&hidden_dir)?;
+        // 检查是否已经是 git 仓库
+        let is_git_repo = hidden_dir.join(".git").exists();
         
-        // 设置远程 origin
-        let repo = git2::Repository::open(&hidden_dir)?;
-        repo.remote("origin", &remote_url)?;
+        if !is_git_repo {
+            // 初始化本地 git 仓库
+            GitOperations::init_repository(&hidden_dir)?;
+            
+            // 设置远程 origin
+            let repo = git2::Repository::open(&hidden_dir)?;
+            repo.remote("origin", &remote_url)?;
+        } else {
+            // 已经是 git 仓库，检查是否需要更新 remote
+            let repo = git2::Repository::open(&hidden_dir)?;
+            if repo.find_remote("origin").is_err() {
+                repo.remote("origin", &remote_url)?;
+            }
+        }
         
         // 注册到索引
         let registration = ProjectRegistration {
@@ -326,12 +345,15 @@ impl RepositoryManager {
         &self,
         project_path: &Path,
         directory: &str,
-        repository_key: &str
+        repository_key: &str,
+        dir_was_created: bool,  // 新增参数：目录是否是我们创建的
     ) -> Result<(), RepositoryError> {
-        // 删除本地隐藏目录
-        let hidden_dir = project_path.join(directory);
-        if hidden_dir.exists() {
-            std::fs::remove_dir_all(&hidden_dir)?;
+        // 只有当目录是我们新创建的才删除
+        if dir_was_created {
+            let hidden_dir = project_path.join(directory);
+            if hidden_dir.exists() {
+                std::fs::remove_dir_all(&hidden_dir)?;
+            }
         }
         
         // 生成 MD5 仓库名
