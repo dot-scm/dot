@@ -65,9 +65,26 @@ make setup  # 安装依赖并运行测试
 
 ## ⚙️ 设置
 
-### 1. 设置 GitHub 令牌
+### 快速设置（推荐）
 
-创建一个具有仓库权限的 [GitHub 个人访问令牌](https://github.com/settings/tokens)：
+运行交互式设置向导：
+
+```bash
+dot setup
+```
+
+向导将引导你完成：
+1. 检查 Git 配置
+2. 获取你的 GitHub 用户名
+3. 选择 GitHub 组织
+4. 创建配置文件
+5. 设置索引仓库
+
+### 手动设置
+
+#### 1. 设置 GitHub 令牌（可选）
+
+如果你需要超出 Git 凭证的 API 访问权限：
 
 ```bash
 export GITHUB_TOKEN="your_github_token_here"
@@ -78,7 +95,7 @@ echo 'export GITHUB_TOKEN="your_github_token_here"' >> ~/.bashrc
 echo 'export GITHUB_TOKEN="your_github_token_here"' >> ~/.zshrc
 ```
 
-### 2. 配置组织
+#### 2. 配置组织
 
 首次使用时，`dot` 会创建 `~/.dot/dot.conf`。编辑此文件以添加授权的 GitHub 组织：
 
@@ -103,7 +120,6 @@ nano ~/.dot/dot.conf
 ```bash
 dot --version
 dot --help
-make check-install
 ```
 
 ## 🎯 快速开始

@@ -65,9 +65,26 @@ make setup  # Install dependencies and run tests
 
 ## ⚙️ Setup
 
-### 1. Set GitHub Token
+### Quick Setup (Recommended)
 
-Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with repository permissions:
+Run the interactive setup wizard:
+
+```bash
+dot setup
+```
+
+The wizard will guide you through:
+1. Checking Git configuration
+2. Getting your GitHub username
+3. Selecting a GitHub organization
+4. Creating the configuration file
+5. Setting up the index repository
+
+### Manual Setup
+
+#### 1. Set GitHub Token (Optional)
+
+If you need API access beyond your Git credentials:
 
 ```bash
 export GITHUB_TOKEN="your_github_token_here"
@@ -78,7 +95,7 @@ echo 'export GITHUB_TOKEN="your_github_token_here"' >> ~/.bashrc
 echo 'export GITHUB_TOKEN="your_github_token_here"' >> ~/.zshrc
 ```
 
-### 2. Configure Organizations
+#### 2. Configure Organizations
 
 On first use, `dot` will create `~/.dot/dot.conf`. Edit this file to add authorized GitHub organizations:
 
@@ -103,7 +120,6 @@ Configuration format:
 ```bash
 dot --version
 dot --help
-make check-install
 ```
 
 ## 🎯 Quick Start

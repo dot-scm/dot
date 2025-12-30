@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use dot::{config::ConfigManager, index::IndexManager, repository::RepositoryManager, error::DotError};
+use dot::{config::ConfigManager, index::IndexManager, repository::RepositoryManager, error::DotError, setup::SetupWizard};
 
 #[derive(Parser)]
 #[command(name = "dot")]
@@ -18,6 +18,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Interactive setup wizard for first-time configuration
+    Setup,
     /// Initialize dot project with hidden directories
     Init { 
         /// Hidden directories to manage
@@ -51,24 +53,43 @@ enum Commands {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     
+    // Setup 命令不需要加载配置
+    if let Commands::Setup = cli.command {
+        match SetupWizard::run().await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                eprintln!("Setup failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+    
     // Load configuration
     let config = match ConfigManager::load().await {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Failed to load configuration: {}", e);
+            eprintln!();
+            eprintln!("💡 提示: 运行 'dot setup' 进行初始化设置");
             std::process::exit(1);
         }
     };
+    
+    // 检查是否有配置默认组织
+    if config.get_default_organization().is_none() {
+        eprintln!("Error: No default organization configured");
+        eprintln!();
+        eprintln!("💡 提示: 运行 'dot setup' 进行初始化设置");
+        std::process::exit(1);
+    }
     
     // Initialize index manager
     let index_manager = match IndexManager::new(&config).await {
         Ok(manager) => manager,
         Err(e) => {
             eprintln!("Failed to initialize index manager: {}", e);
-            eprintln!("Make sure you have:");
-            eprintln!("1. Set GITHUB_TOKEN environment variable");
-            eprintln!("2. Added authorized organizations to ~/.dot/dot.conf");
-            eprintln!("3. Set a default organization in the config");
+            eprintln!();
+            eprintln!("💡 提示: 运行 'dot setup' 进行初始化设置");
             std::process::exit(1);
         }
     };
@@ -78,6 +99,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Execute command
     let result = match cli.command {
+        Commands::Setup => {
+            // 已在前面处理
+            Ok(())
+        },
         Commands::Init { directories } => {
             if directories.is_empty() {
                 eprintln!("Error: At least one directory must be specified");

@@ -10,5 +10,6 @@ pub mod index;
 pub mod git_operations;
 pub mod atomic;
 pub mod repository;
+pub mod setup;
 
 pub use error::*;
