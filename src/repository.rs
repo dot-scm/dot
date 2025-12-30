@@ -9,6 +9,7 @@ use std::env;
 use md5;
 
 pub struct RepositoryManager {
+    #[allow(dead_code)]
     config: ConfigManager,
     index_manager: IndexManager,
     github_client: GitHubClient,

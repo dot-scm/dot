@@ -1,5 +1,5 @@
 use crate::error::RepositoryError;
-use git2::{Repository, Signature, RemoteCallbacks, PushOptions, Cred};
+use git2::{Repository, Signature};
 use std::path::Path;
 use std::process::Command;
 
@@ -141,18 +141,30 @@ impl GitOperations {
     
     /// 推送到远程仓库
     pub fn push<P: AsRef<Path>>(repo_path: P) -> Result<(), RepositoryError> {
-        let repo = Repository::open(repo_path)?;
-        let mut remote = repo.find_remote("origin")?;
+        let path = repo_path.as_ref();
         
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(|_url, username_from_url, _allowed_types| {
-            Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
-        });
+        // 获取当前分支名
+        let repo = Repository::open(path)?;
+        let head = repo.head()?;
+        let branch_name = head.shorthand().unwrap_or("main");
         
-        let mut push_options = PushOptions::new();
-        push_options.remote_callbacks(callbacks);
+        // 使用 git 命令行推送，更可靠地处理 SSH 认证和首次推送
+        let output = std::process::Command::new("git")
+            .args(["-C", path.to_str().unwrap_or("."), "push", "-u", "origin", branch_name])
+            .output()
+            .map_err(|e| RepositoryError::IoError(e))?;
         
-        remote.push(&["refs/heads/main:refs/heads/main"], Some(&mut push_options))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // 如果是 "everything up-to-date" 或类似消息，不算错误
+            if stderr.contains("Everything up-to-date") || stderr.contains("up to date") {
+                return Ok(());
+            }
+            return Err(RepositoryError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("git push failed: {}", stderr)
+            )));
+        }
         
         Ok(())
     }
@@ -196,7 +208,7 @@ impl GitOperations {
     }
     
     /// 获取 git signature
-    fn get_signature(repo: &Repository) -> Result<Signature, RepositoryError> {
+    fn get_signature(repo: &Repository) -> Result<Signature<'_>, RepositoryError> {
         let config = repo.config()?;
         
         let name = config.get_string("user.name")
