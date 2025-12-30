@@ -23,10 +23,13 @@ impl SetupWizard {
         // 步骤 3: 询问要使用的组织
         let organization = Self::prompt_organization(&github_username)?;
         
-        // 步骤 4: 创建配置文件
-        Self::create_config(&organization).await?;
+        // 步骤 4: 询问 GitHub Token（可选）
+        let github_token = Self::prompt_github_token()?;
         
-        // 步骤 5: 检查并创建 .index 仓库
+        // 步骤 5: 创建配置文件
+        Self::create_config(&organization, github_token.as_deref()).await?;
+        
+        // 步骤 6: 检查并创建 .index 仓库
         Self::setup_index_repository(&organization).await?;
         
         println!();
@@ -161,7 +164,7 @@ impl SetupWizard {
     
     /// 询问要使用的组织
     fn prompt_organization(github_username: &str) -> Result<String, ConfigError> {
-        println!("🏢 步骤 3/5: 选择 GitHub 组织");
+        println!("🏢 步骤 3/6: 选择 GitHub 组织");
         println!();
         println!("   dot 需要一个 GitHub 组织来存储隐藏仓库。");
         println!("   你可以使用自己的用户名作为组织（个人账户），");
@@ -189,9 +192,46 @@ impl SetupWizard {
         Ok(organization)
     }
     
+    /// 询问 GitHub Token（可选）
+    fn prompt_github_token() -> Result<Option<String>, ConfigError> {
+        println!("🔑 步骤 4/6: 配置 GitHub Token（可选）");
+        println!();
+        println!("   GitHub Token 用于通过 API 创建远程仓库。");
+        println!("   如果不配置，将使用 GitHub CLI (gh) 作为备选方案。");
+        println!();
+        println!("   获取 Token: https://github.com/settings/tokens");
+        println!("   需要的权限: repo (Full control of private repositories)");
+        println!();
+        
+        print!("   请输入 GitHub Token (留空跳过): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+        
+        if input.is_empty() {
+            println!("   ⚠️  未配置 Token，将使用 GitHub CLI (gh) 创建仓库");
+            println!("      请确保已运行 'gh auth login'");
+            println!();
+            return Ok(None);
+        }
+        
+        // 简单验证 token 格式
+        if input.starts_with("ghp_") || input.starts_with("github_pat_") || input.len() > 30 {
+            println!("   ✓ GitHub Token 已配置");
+            println!();
+            Ok(Some(input.to_string()))
+        } else {
+            println!("   ⚠️  Token 格式可能不正确，但仍会保存");
+            println!();
+            Ok(Some(input.to_string()))
+        }
+    }
+    
     /// 创建配置文件
-    async fn create_config(organization: &str) -> Result<(), ConfigError> {
-        println!("📝 步骤 4/5: 创建配置文件");
+    async fn create_config(organization: &str, github_token: Option<&str>) -> Result<(), ConfigError> {
+        println!("📝 步骤 5/6: 创建配置文件");
         println!();
         
         let config_path = Self::config_file_path()?;
@@ -222,6 +262,7 @@ impl SetupWizard {
         let config = DotConfig {
             authorized_organizations: vec![organization.to_string()],
             default_organization: Some(organization.to_string()),
+            github_token: github_token.map(|s| s.to_string()),
         };
         
         let content = serde_json::to_string_pretty(&config)
@@ -236,7 +277,7 @@ impl SetupWizard {
     
     /// 设置 .index 仓库
     async fn setup_index_repository(organization: &str) -> Result<(), ConfigError> {
-        println!("📦 步骤 5/5: 设置索引仓库");
+        println!("📦 步骤 6/6: 设置索引仓库");
         println!();
         
         let dot_dir = Self::dot_dir()?;

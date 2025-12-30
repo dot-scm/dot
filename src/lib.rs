@@ -11,5 +11,6 @@ pub mod git_operations;
 pub mod atomic;
 pub mod repository;
 pub mod setup;
+pub mod github;
 
 pub use error::*;

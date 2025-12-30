@@ -2,21 +2,23 @@ use crate::config::ConfigManager;
 use crate::index::{IndexManager, ProjectRegistration};
 use crate::git_operations::GitOperations;
 use crate::atomic::{AtomicOperations, AddOperation, CommitOperation, PushOperation};
+use crate::github::GitHubClient;
 use crate::error::RepositoryError;
 use std::path::{Path, PathBuf};
 use std::env;
-use std::process::Command;
 use md5;
 
 pub struct RepositoryManager {
-    #[allow(dead_code)]
     config: ConfigManager,
     index_manager: IndexManager,
+    github_client: GitHubClient,
 }
 
 impl RepositoryManager {
     pub fn new(config: ConfigManager, index_manager: IndexManager) -> Self {
-        Self { config, index_manager }
+        let github_token = config.get_github_token();
+        let github_client = GitHubClient::new(github_token);
+        Self { config, index_manager, github_client }
     }
     
     pub async fn init_project(
@@ -274,56 +276,31 @@ impl RepositoryManager {
         // 生成 MD5 仓库名
         let repo_name = format!("{:x}", md5::compute(repository_key.as_bytes()));
         
-        // 获取组织名（克隆以避免借用问题）
+        // 获取组织名
         let org = self.index_manager.get_organization().to_string();
         
-        // 使用 gh CLI 在 GitHub 上创建远程仓库（必须成功）
+        // 使用 GitHub API 或 gh CLI 创建远程仓库（必须成功）
         println!("Creating remote repository: {}/{}", org, repo_name);
-        let create_output = Command::new("gh")
-            .args([
-                "repo", "create",
-                &format!("{}/{}", org, repo_name),
-                "--private",
-                "--description", &format!("Hidden repository for {}", repository_key),
-            ])
-            .output();
-            
-        match create_output {
-            Ok(output) => {
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    // 如果仓库已存在，可以继续
-                    if stderr.contains("already exists") {
-                        println!("  Remote repository already exists, continuing...");
-                    } else {
-                        // 远程仓库创建失败，清理本地目录并返回错误
-                        if hidden_dir.exists() {
-                            let _ = std::fs::remove_dir_all(&hidden_dir);
-                        }
-                        return Err(RepositoryError::IoError(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Failed to create remote repository: {}. Please run 'gh auth login' first.", stderr.trim())
-                        )));
-                    }
-                }
+        let description = format!("Hidden repository for {}", repository_key);
+        
+        let remote_url = match self.github_client.create_repository(&org, &repo_name, &description).await {
+            Ok(url) => {
+                println!("  ✓ Remote repository created successfully");
+                url
             }
             Err(e) => {
-                // gh CLI 不可用，清理本地目录并返回错误
+                // 远程仓库创建失败，清理本地目录并返回错误
                 if hidden_dir.exists() {
                     let _ = std::fs::remove_dir_all(&hidden_dir);
                 }
-                return Err(RepositoryError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("GitHub CLI (gh) not available: {}. Please install gh CLI: https://cli.github.com/", e)
-                )));
+                return Err(e);
             }
-        }
+        };
         
         // 初始化本地 git 仓库
         GitOperations::init_repository(&hidden_dir)?;
         
         // 设置远程 origin
-        let remote_url = format!("git@github.com:{}/{}.git", org, repo_name);
         let repo = git2::Repository::open(&hidden_dir)?;
         repo.remote("origin", &remote_url)?;
         
@@ -341,7 +318,7 @@ impl RepositoryManager {
         self.index_manager.register_project(registration).await?;
         
         println!("✓ Created hidden repository: {}", directory);
-        println!("  - Remote: git@github.com:{}/{}.git", org, repo_name);
+        println!("  - Remote: {}", remote_url);
         Ok(())
     }
     
@@ -363,19 +340,8 @@ impl RepositoryManager {
         
         // 尝试删除远程仓库
         println!("Rolling back: deleting remote repository {}/{}", org, repo_name);
-        let delete_output = Command::new("gh")
-            .args([
-                "repo", "delete",
-                &format!("{}/{}", org, repo_name),
-                "--yes",
-            ])
-            .output();
-            
-        if let Ok(output) = delete_output {
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("Warning: Failed to delete remote repository: {}", stderr);
-            }
+        if let Err(e) = self.github_client.delete_repository(org, &repo_name).await {
+            eprintln!("Warning: Failed to delete remote repository: {}", e);
         }
         
         Ok(())

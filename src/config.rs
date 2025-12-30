@@ -1,11 +1,14 @@
 use crate::error::ConfigError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::env;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DotConfig {
     pub authorized_organizations: Vec<String>,
     pub default_organization: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
 }
 
 impl Default for DotConfig {
@@ -13,6 +16,7 @@ impl Default for DotConfig {
         Self {
             authorized_organizations: vec![],
             default_organization: None,
+            github_token: None,
         }
     }
 }
@@ -47,6 +51,25 @@ impl ConfigManager {
     
     pub fn get_default_organization(&self) -> Option<&String> {
         self.config.default_organization.as_ref()
+    }
+    
+    /// 获取 GitHub Token（优先从配置文件，其次从环境变量）
+    pub fn get_github_token(&self) -> Option<String> {
+        // 优先使用配置文件中的 token
+        if let Some(token) = &self.config.github_token {
+            if !token.is_empty() {
+                return Some(token.clone());
+            }
+        }
+        // 其次使用环境变量
+        env::var("GITHUB_TOKEN")
+            .or_else(|_| env::var("GH_TOKEN"))
+            .ok()
+    }
+    
+    pub async fn set_github_token(&mut self, token: String) -> Result<(), ConfigError> {
+        self.config.github_token = Some(token);
+        self.save().await
     }
     
     pub async fn add_organization(&mut self, org: String) -> Result<(), ConfigError> {
