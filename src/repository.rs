@@ -5,8 +5,11 @@ use crate::atomic::{AtomicOperations, AddOperation, CommitOperation, PushOperati
 use crate::error::RepositoryError;
 use std::path::{Path, PathBuf};
 use std::env;
+use std::process::Command;
+use md5;
 
 pub struct RepositoryManager {
+    #[allow(dead_code)]
     config: ConfigManager,
     index_manager: IndexManager,
 }
@@ -230,7 +233,7 @@ impl RepositoryManager {
         // 克隆所有关联的隐藏仓库
         for project in associated_projects {
             let hidden_dir = target_path.join(&project.hidden_directory);
-            let hidden_repo_url = self.generate_hidden_repo_url(&project.repository_key)?;
+            let hidden_repo_url = self.generate_hidden_repo_url(&project.repository_name)?;
             
             match GitOperations::clone_repository(&hidden_repo_url, &hidden_dir) {
                 Ok(_) => println!("Cloned hidden repository: {}", project.hidden_directory),
@@ -268,22 +271,53 @@ impl RepositoryManager {
             std::fs::create_dir_all(&hidden_dir)?;
         }
         
-        // 在父仓库中创建 .gitignore 文件，忽略隐藏目录的内容
-        let gitignore_path = hidden_dir.join(".gitignore");
-        let gitignore_content = "# 忽略此目录下的所有内容（由 dot 管理）\n*\n!.gitignore\n";
-        std::fs::write(&gitignore_path, gitignore_content)?;
+        // 生成 MD5 仓库名
+        let repo_name = format!("{:x}", md5::compute(repository_key.as_bytes()));
         
-        // 初始化 git 仓库
+        // 获取组织名（克隆以避免借用问题）
+        let org = self.index_manager.get_organization().to_string();
+        
+        // 使用 gh CLI 在 GitHub 上创建远程仓库
+        println!("Creating remote repository: {}/{}", org, repo_name);
+        let create_output = Command::new("gh")
+            .args([
+                "repo", "create",
+                &format!("{}/{}", org, repo_name),
+                "--private",
+                "--description", &format!("Hidden repository for {}", repository_key),
+            ])
+            .output();
+            
+        match create_output {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    // 如果仓库已存在，继续执行
+                    if !stderr.contains("already exists") {
+                        eprintln!("Warning: Failed to create remote repository: {}", stderr);
+                        eprintln!("You may need to create it manually or install GitHub CLI (gh)");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: GitHub CLI not available: {}", e);
+                eprintln!("Please install gh CLI or create the repository manually:");
+                eprintln!("  Repository: {}/{}", org, repo_name);
+            }
+        }
+        
+        // 初始化本地 git 仓库
         GitOperations::init_repository(&hidden_dir)?;
         
-        // 创建远程仓库并设置 origin
-        let remote_url = self.create_remote_hidden_repository(repository_key).await?;
+        // 设置远程 origin
+        let remote_url = format!("git@github.com:{}/{}.git", org, repo_name);
         let repo = git2::Repository::open(&hidden_dir)?;
         repo.remote("origin", &remote_url)?;
         
         // 注册到索引
         let registration = ProjectRegistration {
             repository_key: repository_key.to_string(),
+            repository_name: repo_name.clone(),
             git_user: GitOperations::get_git_user(project_path)?,
             project_git_path: self.get_remote_origin(project_path)?,
             project_disk_path: project_path.to_string_lossy().to_string(),
@@ -293,8 +327,8 @@ impl RepositoryManager {
         
         self.index_manager.register_project(registration).await?;
         
-        println!("Created hidden repository: {}", directory);
-        println!("  - Added .gitignore to exclude from parent repository");
+        println!("✓ Created hidden repository: {}", directory);
+        println!("  - Remote: git@github.com:{}/{}.git", org, repo_name);
         Ok(())
     }
     
@@ -316,22 +350,15 @@ impl RepositoryManager {
         Ok(())
     }
     
-    async fn create_remote_hidden_repository(&self, repository_key: &str) -> Result<String, RepositoryError> {
-        // 这里应该使用 GitHub API 创建仓库
-        // 为了简化，我们返回一个模拟的 URL
-        let org = self.config.get_default_organization()
-            .ok_or(RepositoryError::ConfigError(crate::error::ConfigError::OrganizationNotAuthorized))?;
-        
-        let repo_name = repository_key.replace('/', "-").replace(':', "-");
-        Ok(format!("git@github.com:{}/{}.git", org, repo_name))
+    #[allow(dead_code)]
+    async fn create_remote_hidden_repository(&self, _repository_key: &str) -> Result<String, RepositoryError> {
+        // 这个方法不再使用，保留以兼容
+        unreachable!("This method is deprecated")
     }
     
-    fn generate_hidden_repo_url(&self, repository_key: &str) -> Result<String, RepositoryError> {
-        let org = self.config.get_default_organization()
-            .ok_or(RepositoryError::ConfigError(crate::error::ConfigError::OrganizationNotAuthorized))?;
-        
-        let repo_name = repository_key.replace('/', "-").replace(':', "-");
-        Ok(format!("git@github.com:{}/{}.git", org, repo_name))
+    fn generate_hidden_repo_url(&self, repository_name: &str) -> Result<String, RepositoryError> {
+        let org = self.index_manager.get_organization();
+        Ok(format!("git@github.com:{}/{}.git", org, repository_name))
     }
     
     async fn is_dot_initialized(&self, path: &Path) -> Result<bool, RepositoryError> {

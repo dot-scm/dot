@@ -14,13 +14,13 @@ clap = { version = "4.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-octocrab = "0.32"
 git2 = "0.18"
 dirs = "5.0"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 thiserror = "1.0"
 async-trait = "0.1"
+md5 = "0.7"
 
 [dev-dependencies]
 proptest = "1.0"

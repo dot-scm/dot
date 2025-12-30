@@ -8,6 +8,7 @@ use std::process::Command;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectRegistration {
     pub repository_key: String,
+    pub repository_name: String,  // MD5 hash of repository_key
     pub git_user: String,
     pub project_git_path: String,
     pub project_disk_path: String,
@@ -214,6 +215,10 @@ impl IndexManager {
         self.index_data.projects.contains_key(repository_key)
     }
     
+    pub fn get_organization(&self) -> &str {
+        &self.remote_organization
+    }
+    
     pub fn find_projects_by_base_key(&self, base_key: &str) -> Vec<&ProjectRegistration> {
         self.index_data.projects
             .values()
@@ -275,6 +280,7 @@ mod tests {
         
         let registration = ProjectRegistration {
             repository_key: "github.com/user/repo/.kiro".to_string(),
+            repository_name: "abc123def456".to_string(),
             git_user: "testuser".to_string(),
             project_git_path: "git@github.com:user/repo.git".to_string(),
             project_disk_path: "/home/user/repo".to_string(),
