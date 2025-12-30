@@ -22,3 +22,7 @@ Thumbs.db
 coverage/
 
 dist
+
+.kiro
+
+.test-hidden

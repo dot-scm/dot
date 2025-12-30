@@ -17,14 +17,8 @@ pub enum ConfigError {
 
 #[derive(Error, Debug)]
 pub enum IndexError {
-    #[error("No default organization configured")]
+    #[error("No default organization configured. Run 'dot setup' first.")]
     NoDefaultOrganization,
-    
-    #[error("Failed to get GitHub token")]
-    GitHubTokenNotFound,
-    
-    #[error("GitHub API error: {0}")]
-    GitHubError(#[from] octocrab::Error),
     
     #[error("Project already exists: {0}")]
     ProjectAlreadyExists(String),

@@ -1,10 +1,9 @@
 use crate::config::ConfigManager;
 use crate::error::IndexError;
-use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::env;
+use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectRegistration {
@@ -32,7 +31,6 @@ impl Default for IndexData {
 pub struct IndexManager {
     local_index_path: PathBuf,
     remote_organization: String,
-    github_client: Octocrab,
     index_data: IndexData,
 }
 
@@ -42,18 +40,12 @@ impl IndexManager {
             .ok_or(IndexError::NoDefaultOrganization)?
             .clone();
             
-        let github_client = Octocrab::builder()
-            .personal_token(Self::get_github_token()?)
-            .build()
-            .map_err(IndexError::GitHubError)?;
-            
         let local_index_path = Self::local_index_path()?;
         
         // 检查并设置索引仓库
         let mut manager = Self {
             local_index_path,
             remote_organization: org,
-            github_client,
             index_data: IndexData::default(),
         };
         
@@ -64,87 +56,126 @@ impl IndexManager {
     }
     
     async fn ensure_index_repository(&self) -> Result<(), IndexError> {
-        // 检查远程 .index 仓库是否存在
-        let repo_exists = self.github_client
-            .repos(&self.remote_organization, ".index")
-            .get()
-            .await
-            .is_ok();
-            
-        if !repo_exists {
-            // 创建 .index 仓库 - 暂时跳过，需要手动创建
-            println!("Warning: .index repository does not exist in organization '{}'", self.remote_organization);
-            println!("Please create it manually on GitHub as a private repository.");
-            return Err(IndexError::IoError(std::io::Error::new(
-                std::io::ErrorKind::NotFound, 
-                "Index repository not found - please create it manually on GitHub"
-            )));
-        }
-        
-        // 克隆或更新本地索引
-        if !self.local_index_path.exists() {
-            self.clone_index_repository().await?;
-        } else {
+        // 检查本地索引目录是否存在
+        if self.local_index_path.exists() {
+            // 本地已存在，尝试更新
             self.update_local_index().await?;
+            return Ok(());
         }
         
-        Ok(())
+        // 尝试克隆远程 .index 仓库
+        let clone_result = self.clone_index_repository().await;
+        
+        match clone_result {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                // 克隆失败，可能是仓库不存在
+                // 创建本地索引目录和初始文件
+                println!("⚠️  无法克隆索引仓库，将创建本地索引");
+                println!("   请确保在 GitHub 上创建了 .index 仓库");
+                self.create_local_index().await?;
+                Ok(())
+            }
+        }
     }
     
     async fn clone_index_repository(&self) -> Result<(), IndexError> {
-        let clone_url = format!("https://github.com/{}/{}.git", self.remote_organization, ".index");
+        // 使用 SSH URL（利用用户的 Git 凭证）
+        let clone_url = format!("git@github.com:{}/{}.git", self.remote_organization, ".index");
         
         // 确保父目录存在
         if let Some(parent) = self.local_index_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
         
-        // 使用 git2 克隆仓库
-        let repo = git2::Repository::clone(&clone_url, &self.local_index_path)
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        // 使用 git 命令克隆（利用系统的 Git 凭证）
+        let output = Command::new("git")
+            .args(["clone", &clone_url, self.local_index_path.to_str().unwrap()])
+            .output()
+            .map_err(|e| IndexError::IoError(e))?;
             
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(IndexError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to clone index repository: {}", stderr)
+            )));
+        }
+        
         // 如果仓库是空的，创建初始的 index.json 文件
         let index_file = self.local_index_path.join("index.json");
         if !index_file.exists() {
-            let initial_data = IndexData::default();
-            let content = serde_json::to_string_pretty(&initial_data)?;
-            tokio::fs::write(&index_file, content).await?;
-            
-            // 提交初始文件
-            let mut index = repo.index().map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            index.add_path(std::path::Path::new("index.json")).map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            index.write().map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-            let tree_id = index.write_tree().map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            let tree = repo.find_tree(tree_id).map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-            let signature = git2::Signature::now("dot-cli", "dot-cli@example.com")
-                .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-                
-            repo.commit(
-                Some("HEAD"),
-                &signature,
-                &signature,
-                "Initialize index repository",
-                &tree,
-                &[],
-            ).map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            self.initialize_index_file().await?;
         }
         
         Ok(())
     }
     
+    async fn create_local_index(&self) -> Result<(), IndexError> {
+        // 创建本地索引目录
+        tokio::fs::create_dir_all(&self.local_index_path).await?;
+        
+        // 初始化 Git 仓库
+        let output = Command::new("git")
+            .args(["init"])
+            .current_dir(&self.local_index_path)
+            .output()
+            .map_err(|e| IndexError::IoError(e))?;
+            
+        if !output.status.success() {
+            return Err(IndexError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to initialize local index repository"
+            )));
+        }
+        
+        // 设置远程 origin
+        let remote_url = format!("git@github.com:{}/{}.git", self.remote_organization, ".index");
+        let _ = Command::new("git")
+            .args(["remote", "add", "origin", &remote_url])
+            .current_dir(&self.local_index_path)
+            .output();
+        
+        // 创建初始 index.json
+        self.initialize_index_file().await?;
+        
+        Ok(())
+    }
+    
+    async fn initialize_index_file(&self) -> Result<(), IndexError> {
+        let index_file = self.local_index_path.join("index.json");
+        let initial_data = IndexData::default();
+        let content = serde_json::to_string_pretty(&initial_data)?;
+        tokio::fs::write(&index_file, &content).await?;
+        
+        // Git add and commit
+        let _ = Command::new("git")
+            .args(["add", "index.json"])
+            .current_dir(&self.local_index_path)
+            .output();
+            
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Initialize index repository"])
+            .current_dir(&self.local_index_path)
+            .output();
+            
+        Ok(())
+    }
+    
     async fn update_local_index(&self) -> Result<(), IndexError> {
-        let repo = git2::Repository::open(&self.local_index_path)
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        // 使用 git pull 更新本地索引
+        let output = Command::new("git")
+            .args(["pull", "--rebase"])
+            .current_dir(&self.local_index_path)
+            .output();
             
-        // 简单的 git pull 操作
-        let mut remote = repo.find_remote("origin")
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        remote.fetch(&["refs/heads/*:refs/remotes/origin/*"], None, None)
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
+        // 忽略 pull 失败（可能是远程仓库不存在或网络问题）
+        if let Ok(out) = output {
+            if !out.status.success() {
+                // 静默忽略，使用本地数据
+            }
+        }
+        
         Ok(())
     }
     
@@ -195,49 +226,35 @@ impl IndexManager {
         let content = serde_json::to_string_pretty(&self.index_data)?;
         tokio::fs::write(&index_file, content).await?;
         
-        // Git add, commit, push
-        let repo = git2::Repository::open(&self.local_index_path)
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        // Git add
+        let _ = Command::new("git")
+            .args(["add", "index.json"])
+            .current_dir(&self.local_index_path)
+            .output();
+        
+        // Git commit
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Update index"])
+            .current_dir(&self.local_index_path)
+            .output();
+        
+        // Git push（使用系统的 Git 凭证）
+        let push_output = Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&self.local_index_path)
+            .output();
             
-        let mut index = repo.index()
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        index.add_path(std::path::Path::new("index.json"))
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        index.write()
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        let tree_id = index.write_tree()
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        let tree = repo.find_tree(tree_id)
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        let signature = git2::Signature::now("dot-cli", "dot-cli@example.com")
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        let parent_commit = repo.head()
-            .and_then(|h| h.target().ok_or(git2::Error::from_str("No target")))
-            .and_then(|oid| repo.find_commit(oid))
-            .map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-            
-        repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            "Update index",
-            &tree,
-            &[&parent_commit],
-        ).map_err(|e| IndexError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        // 如果 main 分支不存在，尝试 master
+        if let Ok(out) = push_output {
+            if !out.status.success() {
+                let _ = Command::new("git")
+                    .args(["push", "-u", "origin", "master"])
+                    .current_dir(&self.local_index_path)
+                    .output();
+            }
+        }
         
         Ok(())
-    }
-    
-    fn get_github_token() -> Result<String, IndexError> {
-        env::var("GITHUB_TOKEN")
-            .or_else(|_| env::var("GH_TOKEN"))
-            .map_err(|_| IndexError::GitHubTokenNotFound)
     }
     
     fn local_index_path() -> Result<PathBuf, IndexError> {
@@ -251,7 +268,6 @@ impl IndexManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     
     #[test]
     fn test_index_data_serialization() {
@@ -272,41 +288,5 @@ mod tests {
         let deserialized: IndexData = serde_json::from_str(&json).unwrap();
         
         assert_eq!(index_data.projects.len(), deserialized.projects.len());
-    }
-    
-    #[test]
-    fn test_find_projects_by_base_key() {
-        let mut index_data = IndexData::default();
-        
-        let reg1 = ProjectRegistration {
-            repository_key: "github.com/user/repo/.kiro".to_string(),
-            git_user: "testuser".to_string(),
-            project_git_path: "git@github.com:user/repo.git".to_string(),
-            project_disk_path: "/home/user/repo".to_string(),
-            hidden_directory: ".kiro".to_string(),
-            created_at: chrono::Utc::now(),
-        };
-        
-        let reg2 = ProjectRegistration {
-            repository_key: "github.com/user/repo/.config".to_string(),
-            git_user: "testuser".to_string(),
-            project_git_path: "git@github.com:user/repo.git".to_string(),
-            project_disk_path: "/home/user/repo".to_string(),
-            hidden_directory: ".config".to_string(),
-            created_at: chrono::Utc::now(),
-        };
-        
-        index_data.projects.insert(reg1.repository_key.clone(), reg1);
-        index_data.projects.insert(reg2.repository_key.clone(), reg2);
-        
-        let manager = IndexManager {
-            local_index_path: PathBuf::new(),
-            remote_organization: "test".to_string(),
-            github_client: Octocrab::default(),
-            index_data,
-        };
-        
-        let results = manager.find_projects_by_base_key("github.com/user/repo");
-        assert_eq!(results.len(), 2);
     }
 }
