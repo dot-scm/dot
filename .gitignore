@@ -23,6 +23,6 @@ coverage/
 
 dist
 
-.kiro
+/dot-cli
 
-.test-hidden
+.test-kiro
