@@ -268,6 +268,11 @@ impl RepositoryManager {
             std::fs::create_dir_all(&hidden_dir)?;
         }
         
+        // 在父仓库中创建 .gitignore 文件，忽略隐藏目录的内容
+        let gitignore_path = hidden_dir.join(".gitignore");
+        let gitignore_content = "# 忽略此目录下的所有内容（由 dot 管理）\n*\n!.gitignore\n";
+        std::fs::write(&gitignore_path, gitignore_content)?;
+        
         // 初始化 git 仓库
         GitOperations::init_repository(&hidden_dir)?;
         
@@ -289,6 +294,7 @@ impl RepositoryManager {
         self.index_manager.register_project(registration).await?;
         
         println!("Created hidden repository: {}", directory);
+        println!("  - Added .gitignore to exclude from parent repository");
         Ok(())
     }
     

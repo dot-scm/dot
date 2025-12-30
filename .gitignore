@@ -21,6 +21,4 @@ Thumbs.db
 *.profdata
 coverage/
 
-.kiro
-
 dist
